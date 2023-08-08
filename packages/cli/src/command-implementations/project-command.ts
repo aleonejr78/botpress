@@ -1,6 +1,7 @@
 import type * as bpclient from '@botpress/client'
 import type * as bpsdk from '@botpress/sdk'
 import type { YargsConfig } from '@bpinternal/yargs-extra'
+import bluebird from 'bluebird'
 import chalk from 'chalk'
 import fs from 'fs'
 import _ from 'lodash'
@@ -12,6 +13,10 @@ import * as errors from '../errors'
 import type { CommandArgv, CommandDefinition } from '../typings'
 import * as utils from '../utils'
 import { GlobalCommand } from './global-command'
+
+export type IntegrationInstallDir = codegen.IntegrationInstanceJson & {
+  dirname: string
+}
 
 export type ProjectCommandDefinition = CommandDefinition<typeof config.schemas.project>
 export type ProjectCache = { botId: string; devId: string }
@@ -35,6 +40,16 @@ class ProjectPaths extends utils.path.PathStore<keyof AllProjectPaths> {
   }
 }
 
+type ProjectDefinition =
+  | {
+      type: 'bot'
+      definition: bpsdk.BotDefinition
+    }
+  | {
+      type: 'integration'
+      definition: bpsdk.IntegrationDefinition
+    }
+
 export abstract class ProjectCommand<C extends ProjectCommandDefinition> extends GlobalCommand<C> {
   protected get projectPaths() {
     return new ProjectPaths(this.argv)
@@ -44,28 +59,29 @@ export abstract class ProjectCommand<C extends ProjectCommandDefinition> extends
     return new utils.cache.FSKeyValueCache<ProjectCache>(this.projectPaths.abs.projectCacheFile)
   }
 
-  protected parseBot(bot: bpsdk.Bot) {
+  protected parseBot(botDef: bpsdk.BotDefinition, bot: bpsdk.Bot) {
     return {
-      ...bot.props,
+      ...botDef,
       integrations: _(bot.props.integrations)
         .values()
+        .filter(<T>(x: T | undefined): x is T => !!x)
         .keyBy((i) => i.id)
         .mapValues(({ enabled, configuration }) => ({ enabled, configuration }))
         .value(),
-      configuration: bot.props.configuration
+      configuration: botDef.configuration
         ? {
-            ...bot.props.configuration,
-            schema: utils.schema.mapZodToJsonSchema(bot.props.configuration),
+            ...botDef.configuration,
+            schema: utils.schema.mapZodToJsonSchema(botDef.configuration),
           }
         : undefined,
-      events: bot.props.events
-        ? _.mapValues(bot.props.events, (event) => ({
+      events: botDef.events
+        ? _.mapValues(botDef.events, (event) => ({
             ...event,
             schema: utils.schema.mapZodToJsonSchema(event),
           }))
         : undefined,
-      states: bot.props.states
-        ? _.mapValues(bot.props.states, (state) => ({
+      states: botDef.states
+        ? _.mapValues(botDef.states, (state) => ({
             ...state,
             schema: utils.schema.mapZodToJsonSchema(state),
           }))
@@ -119,29 +135,50 @@ export abstract class ProjectCommand<C extends ProjectCommandDefinition> extends
     }
   }
 
-  protected async readIntegrationDefinitionFromFS(): Promise<bpsdk.IntegrationDefinition | undefined> {
+  protected async readDefinitionFromFS(): Promise<ProjectDefinition> {
     const abs = this.projectPaths.abs
     const rel = this.projectPaths.rel('workDir')
 
-    if (!fs.existsSync(abs.definition)) {
-      this.logger.debug(`Integration definition not found at ${rel.definition}`)
-      return
+    if (fs.existsSync(abs.integrationDefinition)) {
+      const { outputFiles } = await utils.esbuild.buildEntrypoint({
+        cwd: abs.workDir,
+        outfile: '',
+        entrypoint: rel.integrationDefinition,
+        write: false,
+      })
+
+      const artifact = outputFiles[0]
+      if (!artifact) {
+        throw new errors.BotpressCLIError('Could not read integration definition')
+      }
+
+      const { default: definition } = utils.require.requireJsCode<{ default: bpsdk.IntegrationDefinition }>(
+        artifact.text
+      )
+
+      return { type: 'integration', definition }
     }
 
-    const { outputFiles } = await utils.esbuild.buildEntrypoint({
-      cwd: abs.workDir,
-      outfile: '',
-      entrypoint: rel.definition,
-      write: false,
-    })
+    // TODO: remove dupplication with integration definition above
+    if (fs.existsSync(abs.botDefinition)) {
+      const { outputFiles } = await utils.esbuild.buildEntrypoint({
+        cwd: abs.workDir,
+        outfile: '',
+        entrypoint: rel.botDefinition,
+        write: false,
+      })
 
-    const artifact = outputFiles[0]
-    if (!artifact) {
-      throw new errors.BotpressCLIError('Could not read integration definition')
+      const artifact = outputFiles[0]
+      if (!artifact) {
+        throw new errors.BotpressCLIError('Could not read bot definition')
+      }
+
+      const { default: definition } = utils.require.requireJsCode<{ default: bpsdk.BotDefinition }>(artifact.text)
+
+      return { type: 'bot', definition }
     }
 
-    const { default: definition } = utils.require.requireJsCode<{ default: bpsdk.IntegrationDefinition }>(artifact.text)
-    return definition
+    throw new errors.BotpressCLIError('Could not find bot or integration definition')
   }
 
   protected async writeGeneratedFilesToOutFolder(files: codegen.File[]) {
@@ -206,6 +243,46 @@ export abstract class ProjectCommand<C extends ProjectCommandDefinition> extends
 
     const envVariables = _.mapKeys(values, (_v, k) => codegen.secretEnvVariableName(k))
     return envVariables
+  }
+
+  protected async generateBotIndex() {
+    const allInstances = await this.listIntegrationInstances()
+    const indexFile = await codegen.generateBotIndex(
+      this.projectPaths.rel('outDir').implementationDir,
+      this.projectPaths.rel('outDir').installDir,
+      allInstances.map((i) => i.dirname)
+    )
+    await this.writeGeneratedFilesToOutFolder([indexFile])
+  }
+
+  protected async listIntegrationInstances(): Promise<IntegrationInstallDir[]> {
+    const installPath = this.projectPaths.abs.installDir
+    if (!fs.existsSync(installPath)) {
+      this.logger.debug('Install path does not exist. Skipping listing of integration instances')
+      return []
+    }
+
+    const allFiles = await fs.promises.readdir(installPath)
+    const allPaths = allFiles.map((name) => pathlib.join(installPath, name))
+    const directories = await bluebird.filter(allPaths, async (path) => {
+      const stat = await fs.promises.stat(path)
+      return stat.isDirectory()
+    })
+
+    let jsons = directories.map((root) => ({ root, json: pathlib.join(root, codegen.INTEGRATION_JSON) }))
+    jsons = jsons.filter(({ json: x }) => fs.existsSync(x))
+
+    return bluebird.map(jsons, async ({ root, json }) => {
+      const content: string = await fs.promises.readFile(json, 'utf-8')
+      const { name, version, id } = JSON.parse(content) as codegen.IntegrationInstanceJson
+      const dirname = pathlib.basename(root)
+      return {
+        dirname,
+        id,
+        name,
+        version,
+      }
+    })
   }
 
   private _parseArgvSecrets(argvSecrets: string[]): Record<string, string> {

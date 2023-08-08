@@ -12,13 +12,16 @@ const GITHUB_ISSUE_OPENED_TYPE = 'github:issueOpened' satisfies GITHUB_EVENT_TYP
 const LINEAR_ISSUE_CHANNEL = 'issue' satisfies LINEAR_CHANNELS
 const LINEAR_CONVERSATION_TAG_ID = 'linear:id' satisfies LINEAR_CONVERSATION_TAG
 
+// import * as sdk from '@botpress/sdk'
+// type TOf<B extends sdk.Bot> = B extends sdk.Bot<infer T> ? T : never
+// type TBot = TOf<botpress.Bot>
+// type States = keyof TBot['states']
+
 const bot = new botpress.Bot({
   integrations: {
     github,
     linear,
   },
-  states: {},
-  events: {},
 })
 
 bot.event(async ({ event, client, ctx }) => {

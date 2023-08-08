@@ -30,7 +30,8 @@ export const fromHomeDir = {
 }
 
 export const fromWorkDir = {
-  definition: 'integration.definition.ts',
+  integrationDefinition: 'integration.definition.ts',
+  botDefinition: 'bot.definition.ts',
 }
 
 export const fromOutDir = {

@@ -28,16 +28,16 @@ export class DevCommand extends ProjectCommand<DevCommandDefinition> {
 
     const api = await this.ensureLoginAndCreateClient(this.argv)
 
-    this._initialDef = await this.readIntegrationDefinitionFromFS()
-
     let env: Record<string, string> = {
       ...process.env,
       BP_API_URL: api.url,
       BP_TOKEN: api.token,
     }
-
     let defaultPort = DEFAULT_BOT_PORT
-    if (this._initialDef) {
+
+    const initialDef = await this.readDefinitionFromFS()
+    if (initialDef.type === 'integration') {
+      this._initialDef = initialDef.definition
       defaultPort = DEFAULT_INTEGRATION_PORT
       const secrets = await this.promptSecrets(this._initialDef, this.argv)
       env = { ...env, ...secrets }
@@ -139,12 +139,12 @@ export class DevCommand extends ProjectCommand<DevCommandDefinition> {
   }
 
   private _deploy = async (api: ApiClient, tunnelUrl: string) => {
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
-    if (integrationDef) {
-      this._checkSecrets(integrationDef)
-      await this._deployDevIntegration(api, tunnelUrl, integrationDef)
+    const def = await this.readDefinitionFromFS()
+    if (def.type === 'integration') {
+      this._checkSecrets(def.definition)
+      await this._deployDevIntegration(api, tunnelUrl, def.definition)
     } else {
-      await this._deployDevBot(api, tunnelUrl)
+      await this._deployDevBot(api, tunnelUrl, def.definition)
     }
   }
 
@@ -232,7 +232,7 @@ export class DevCommand extends ProjectCommand<DevCommandDefinition> {
     await this.projectCache.set('devId', integration.id)
   }
 
-  private async _deployDevBot(api: ApiClient, externalUrl: string): Promise<void> {
+  private async _deployDevBot(api: ApiClient, externalUrl: string, botDef: bpsdk.BotDefinition): Promise<void> {
     const devId = await this.projectCache.get('devId')
 
     let bot: bpclient.Bot | undefined = undefined
@@ -278,7 +278,7 @@ export class DevCommand extends ProjectCommand<DevCommandDefinition> {
       {
         id: bot.id,
         url: externalUrl,
-        ...this.parseBot(botImpl),
+        ...this.parseBot(botDef, botImpl),
       },
       bot
     )

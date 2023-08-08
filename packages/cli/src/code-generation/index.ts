@@ -1,7 +1,8 @@
-import type * as client from '@botpress/client'
-import type { IntegrationDefinition } from '@botpress/sdk'
+import type * as bpclient from '@botpress/client'
+import type * as bpsdk from '@botpress/sdk'
 import pathlib from 'path'
 import * as utils from '../utils'
+import { BotImplementationIndexModule } from './bot-implementation'
 import { GENERATED_HEADER, INDEX_FILE } from './const'
 import { IntegrationImplementationIndexModule } from './integration-implementation'
 import { IntegrationInstanceIndexModule } from './integration-instance'
@@ -13,7 +14,7 @@ export { secretEnvVariableName } from './integration-secret'
 export const INTEGRATION_JSON = 'integration.json'
 
 export const generateIntegrationImplementationTypings = async (
-  integration: IntegrationDefinition,
+  integration: bpsdk.IntegrationDefinition,
   implementationTypingsPath: string
 ): Promise<types.File[]> => {
   const indexModule = await IntegrationImplementationIndexModule.create(integration)
@@ -22,7 +23,7 @@ export const generateIntegrationImplementationTypings = async (
 }
 
 export const generateIntegrationSecrets = async (
-  integration: IntegrationDefinition,
+  integration: bpsdk.IntegrationDefinition,
   secretsPath: string
 ): Promise<types.File[]> => {
   const indexModule = await IntegrationSecretIndexModule.create(integration)
@@ -50,7 +51,7 @@ export type IntegrationInstanceJson = {
 }
 
 export const generateIntegrationInstance = async (
-  integration: client.Integration,
+  integration: bpclient.Integration,
   installPath: string
 ): Promise<types.File[]> => {
   const indexModule = await IntegrationInstanceIndexModule.create(integration)
@@ -72,10 +73,26 @@ export const generateIntegrationInstance = async (
   return files
 }
 
-export const generateBotIndex = async (installPath: string, instances: string[]): Promise<types.File> => {
+export const generateBotImplementationTypings = async (
+  bot: bpsdk.BotDefinition,
+  implementationTypingsPath: string
+): Promise<types.File[]> => {
+  const indexModule = await BotImplementationIndexModule.create(bot)
+  indexModule.unshift(implementationTypingsPath)
+  return indexModule.flatten()
+}
+
+export const generateBotIndex = async (
+  implementationTypingsPath: string,
+  installPath: string,
+  instances: string[]
+): Promise<types.File> => {
+  // TODO: only import from implementation if it was generated
+
   const lines: string[] = [
     GENERATED_HEADER,
     "import * as sdk from '@botpress/sdk'",
+    `import * as implementation from './${implementationTypingsPath}'`,
     ...instances.map(
       (instance) => `import * as ${utils.casing.to.camelCase(instance)} from './${installPath}/${instance}'`
     ),
@@ -83,14 +100,20 @@ export const generateBotIndex = async (installPath: string, instances: string[])
       (instance) => `export * as ${utils.casing.to.camelCase(instance)} from './${installPath}/${instance}'`
     ),
     '',
-    'export class Bot extends sdk.Bot<{',
+    'type TBot = {',
+    '  integrations: {',
     ...instances.map(
       (instance) =>
-        `  ${utils.casing.to.camelCase(instance)}: ${utils.casing.to.camelCase(instance)}.T${utils.casing.to.pascalCase(
+        `    ${utils.casing.to.camelCase(instance)}: ${utils.casing.to.camelCase(
           instance
-        )}`
+        )}.T${utils.casing.to.pascalCase(instance)}`
     ),
-    '}> {}',
+    '  }',
+    '  states: implementation.states.States',
+    '  events: implementation.events.Events',
+    '}',
+    '',
+    'export class Bot extends sdk.Bot<TBot> {}',
   ]
 
   return {

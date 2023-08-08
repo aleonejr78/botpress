@@ -15,15 +15,15 @@ export class ServeCommand extends ProjectCommand<ServeCommandDefinition> {
       throw new errors.NoBundleFoundError()
     }
 
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
-    if (integrationDef) {
-      const secrets = await this.promptSecrets(integrationDef, this.argv)
+    const def = await this.readDefinitionFromFS()
+    if (def.type === 'integration') {
+      const secrets = await this.promptSecrets(def.definition, this.argv)
       for (const [key, value] of Object.entries(secrets)) {
         process.env[key] = value
       }
     }
 
-    this.logger.log(`Serving ${integrationDef ? 'integration' : 'bot'}...`)
+    this.logger.log(`Serving ${def.type}...`)
 
     const { default: serveable } = utils.require.requireJsFile<{ default: Serveable }>(outfile)
     const server = await serveable.start(this.argv.port)

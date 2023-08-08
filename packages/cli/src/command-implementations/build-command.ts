@@ -7,12 +7,8 @@ export type BuildCommandDefinition = typeof commandDefinitions.build
 export class BuildCommand extends ProjectCommand<BuildCommandDefinition> {
   public async run(): Promise<void> {
     const t0 = Date.now()
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
 
-    if (integrationDef) {
-      await this._runGenerate()
-    }
-
+    await this._runGenerate()
     await this._runBundle()
     const dt = Date.now() - t0
     this.logger.log(`Build completed in ${dt}ms`)

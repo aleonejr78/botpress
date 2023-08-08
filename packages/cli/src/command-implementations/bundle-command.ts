@@ -6,7 +6,7 @@ import { ProjectCommand } from './project-command'
 export type BundleCommandDefinition = typeof commandDefinitions.bundle
 export class BundleCommand extends ProjectCommand<BundleCommandDefinition> {
   public async run(): Promise<void> {
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
+    const def = await this.readDefinitionFromFS()
 
     const abs = this.projectPaths.abs
     const rel = this.projectPaths.rel('workDir')
@@ -15,8 +15,8 @@ export class BundleCommand extends ProjectCommand<BundleCommandDefinition> {
 
     const logLevel = this.argv.verbose ? 'info' : 'silent'
 
-    if (integrationDef) {
-      const { name } = integrationDef
+    if (def.type === 'integration') {
+      const { name } = def.definition
       line.started(`Bundling integration ${chalk.bold(name)}...`)
     } else {
       line.started('Bundling bot...')

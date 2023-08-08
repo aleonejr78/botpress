@@ -11,7 +11,14 @@ export {
   IntegrationSpecificClient,
 } from './integration'
 
-export { Bot, BotProps, BotContext, BotSpecificClient, IntegrationInstance } from './bot'
+export {
+  BotDefinition,
+  BotDefinitionProps,
+  BotImplementation as Bot,
+  BotImplementationProps as BotProps,
+  BotContext,
+  BotSpecificClient,
+} from './bot'
 
 /**
  * @deprecated Infer type of integration message handlers instead

@@ -24,11 +24,11 @@ export class DeployCommand extends ProjectCommand<DeployCommandDefinition> {
       await this._runBuild() // This ensures the bundle is always synced with source code
     }
 
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
-    if (integrationDef) {
-      return this._deployIntegration(api, integrationDef)
+    const def = await this.readDefinitionFromFS()
+    if (def.type === 'integration') {
+      return this._deployIntegration(api, def.definition)
     }
-    return this._deployBot(api, this.argv.botId, this.argv.createNewBot)
+    return this._deployBot(api, def.definition, this.argv.botId, this.argv.createNewBot)
   }
 
   private async _runBuild() {
@@ -109,9 +109,15 @@ export class DeployCommand extends ProjectCommand<DeployCommandDefinition> {
     })
   }
 
-  private async _deployBot(api: ApiClient, argvBotId: string | undefined, argvCreateNew: boolean | undefined) {
+  private async _deployBot(
+    api: ApiClient,
+    botDef: bpsdk.BotDefinition,
+    argvBotId: string | undefined,
+    argvCreateNew: boolean | undefined
+  ) {
     const outfile = this.projectPaths.abs.outFile
     const code = await fs.promises.readFile(outfile, 'utf-8')
+
     const { default: botImpl } = utils.require.requireJsFile<{ default: bpsdk.Bot }>(outfile)
 
     let bot: bpclient.Bot
@@ -142,7 +148,7 @@ export class DeployCommand extends ProjectCommand<DeployCommandDefinition> {
       {
         id: bot.id,
         code,
-        ...this.parseBot(botImpl),
+        ...this.parseBot(botDef, botImpl),
       },
       bot
     )

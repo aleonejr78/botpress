@@ -1,4 +1,4 @@
-import type { IntegrationDefinition } from '@botpress/sdk'
+import type * as sdk from '@botpress/sdk'
 import chalk from 'chalk'
 import _ from 'lodash'
 import * as codegen from '../code-generation'
@@ -10,12 +10,30 @@ import { ProjectCommand } from './project-command'
 export type GenerateCommandDefinition = typeof commandDefinitions.generate
 export class GenerateCommand extends ProjectCommand<GenerateCommandDefinition> {
   public async run(): Promise<void> {
-    const integrationDef = await this.readIntegrationDefinitionFromFS()
-    if (!integrationDef) {
-      this.logger.warn('No typings to generate for bot')
+    const def = await this.readDefinitionFromFS()
+    if (def.type === 'integration') {
+      await this._generateIntegrationTypings(def.definition)
       return
     }
+    await this._generateBotTypings(def.definition)
+  }
 
+  private _generateBotTypings = async (botDef: sdk.BotDefinition): Promise<void> => {
+    const line = this.logger.line()
+
+    line.started('Generating typings for bot...')
+
+    const fromWorkDir = this.projectPaths.rel('workDir')
+    const fromOutDir = this.projectPaths.rel('outDir')
+
+    const typingFiles = await codegen.generateBotImplementationTypings(botDef, fromOutDir.implementationDir)
+    await this.writeGeneratedFilesToOutFolder(typingFiles)
+    await this.generateBotIndex()
+
+    line.success(`Typings available at ${chalk.grey(fromWorkDir.outDir)}`)
+  }
+
+  private _generateIntegrationTypings = async (integrationDef: sdk.IntegrationDefinition): Promise<void> => {
     this._validateSecrets(integrationDef)
 
     const line = this.logger.line()
@@ -42,7 +60,7 @@ export class GenerateCommand extends ProjectCommand<GenerateCommandDefinition> {
     line.success(`Typings available at ${chalk.grey(fromWorkDir.outDir)}`)
   }
 
-  private _validateSecrets(integrationDef: IntegrationDefinition): void {
+  private _validateSecrets(integrationDef: sdk.IntegrationDefinition): void {
     const { secrets } = integrationDef
     if (!secrets) {
       return
